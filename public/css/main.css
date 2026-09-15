@@ -225,7 +225,7 @@ tr:hover td { background: var(--bg2); }
 .lesson-topbar { height: 50px; background: var(--surface); border-bottom: 1.5px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0; box-shadow: var(--shadow); }
 .lesson-body { display: grid; grid-template-columns: 260px 1fr; flex: 1; overflow: hidden; }
 .lesson-left { border-right: 1.5px solid var(--border); background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
-.video-area { aspect-ratio: 4/3; background: #1a1f2e; flex-shrink: 0; position: relative; display: flex; align-items: center; justify-content: center; }
+.video-area { aspect-ratio: 4/3; background: #111827; flex-shrink: 0; position: relative; overflow: hidden; display: block; }
 .video-pip { position: absolute; bottom: 8px; right: 8px; width: 68px; height: 52px; border-radius: 8px; background: #2a3040; border: 1.5px solid rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; font-size: 10px; color: rgba(255,255,255,.4); }
 .video-controls-bar { position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; padding: 8px; background: linear-gradient(to top, rgba(0,0,0,.5), transparent); }
 .vc-btn { width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.2); cursor: pointer; color: #fff; display: flex; align-items: center; justify-content: center; transition: var(--t); }
