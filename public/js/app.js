@@ -107,6 +107,13 @@ async function render() {
     return;
   }
   if (S.view === 'lesson') {
+    if (!S.params?.session_id) {
+      const defaultView = S.user.role === 'admin' ? 'admin-curriculum'
+        : S.user.role === 'teacher' ? 'teacher-students' : 'student-lessons';
+      S.view = defaultView;
+      render();
+      return;
+    }
     app.innerHTML = renderLessonShell();
     await initLesson();
     return;
@@ -1710,6 +1717,7 @@ window.copySessionId = (sid) => {
 window.backToDashboard = () => {
   S.lesson.socket?.disconnect();
   S.lesson = { session_id: null, socket: null, pages: [], currentPageId: null, exercises: {}, responses: {}, notes: '', audioState: {} };
+  S.params = {}; // clear stale session params
   const defaultView = S.user.role === 'admin' ? 'admin-curriculum'
     : S.user.role === 'teacher' ? 'teacher-students' : 'student-lessons';
   navigate(defaultView);
