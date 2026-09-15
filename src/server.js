@@ -249,6 +249,25 @@ app.get('/api/student/lessons', requireAuth(['student']), (req, res) => {
     ORDER BY sec.sort_order,sub.sort_order,l.sort_order`, req.user.id));
 });
 
+// Active sessions for a student (their teacher's open sessions)
+app.get('/api/student/active-sessions', requireAuth(['student']), (req, res) => {
+  const sessions = db.all(`
+    SELECT ls.id session_id, ls.lesson_id, ls.teacher_id, ls.started_at,
+           l.title lesson_title, u.name teacher_name,
+           sub.name sub_name, sec.name sec_name
+    FROM lesson_sessions ls
+    JOIN lessons l ON l.id = ls.lesson_id
+    JOIN subsections sub ON sub.id = l.subsection_id
+    JOIN sections sec ON sec.id = sub.section_id
+    JOIN users u ON u.id = ls.teacher_id
+    JOIN teacher_students ts ON ts.teacher_id = ls.teacher_id AND ts.student_id = ?
+    WHERE ls.ended_at IS NULL
+    AND ls.student_id = ?
+    ORDER BY ls.started_at DESC
+  `, req.user.id, req.user.id);
+  res.json(sessions);
+});
+
 // ── SESSIONS ──────────────────────────────
 app.post('/api/sessions', requireAuth(['teacher','student']), (req, res) => {
   const { lesson_id, student_id } = req.body;
