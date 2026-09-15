@@ -1079,18 +1079,26 @@ function renderLessonShell() {
     </div>
     <div class="lesson-body">
       <div class="lesson-left" id="lesson-left">
-        <div class="video-area">
-          <div style="text-align:center;color:rgba(255,255,255,.25);">
-            <div style="font-size:32px;">🎥</div>
-            <div style="font-size:11px;margin-top:4px;">Video call area</div>
+        <div class="video-area" id="video-area">
+          <!-- Remote video (partner) - full size background -->
+          <video id="video-remote" autoplay playsinline
+            style="width:100%;height:100%;object-fit:cover;display:block;background:#111;"></video>
+          <!-- Waiting state shown until partner connects -->
+          <div id="video-waiting" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:rgba(255,255,255,.35);pointer-events:none;">
+            <div style="font-size:28px;">👤</div>
+            <div style="font-size:11px;margin-top:6px;">Waiting for partner…</div>
           </div>
-          <div class="video-pip">You</div>
+          <!-- Local video PiP -->
+          <video id="video-local" autoplay playsinline muted
+            style="position:absolute;bottom:44px;right:8px;width:72px;height:54px;object-fit:cover;border-radius:8px;border:1.5px solid rgba(255,255,255,.2);background:#222;display:block;"></video>
+          <!-- Local video label -->
+          <div style="position:absolute;bottom:46px;right:8px;width:72px;text-align:center;font-size:9px;color:rgba(255,255,255,.5);pointer-events:none;padding-top:2px;">You</div>
           <div class="video-controls-bar">
-            <div class="vc-btn" id="vc-mic" onclick="this.classList.toggle('muted')" title="Mute">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+            <div class="vc-btn" id="vc-mic" onclick="toggleMic()" title="Mute mic">
+              <svg id="vc-mic-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
             </div>
-            <div class="vc-btn" onclick="this.classList.toggle('muted')" title="Camera">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            <div class="vc-btn" id="vc-cam" onclick="toggleCam()" title="Turn off camera">
+              <svg id="vc-cam-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
             </div>
           </div>
         </div>
@@ -1182,6 +1190,9 @@ async function initLesson() {
   socket.on('connect', () => {
     socket.emit('join_session', { session_id });
     document.getElementById('lesson-status').innerHTML = '<span class="badge badge-green live-dot">Connected</span>';
+    // Start WebRTC after socket is ready
+    const isTeacher = role === 'teacher';
+    startWebRTC(socket, session_id, isTeacher);
   });
 
   socket.on('disconnect', () => {
@@ -1710,7 +1721,142 @@ window.copySessionId = (sid) => {
   navigator.clipboard.writeText(sid).then(() => toast('Session ID copied! Share it with your student.', 'success', 4000));
 };
 
+// ══════════════════════════════════════════
+// WEBRTC VIDEO CHAT
+// ══════════════════════════════════════════
+const RTC = {
+  pc: null,          // RTCPeerConnection
+  localStream: null, // MediaStream from camera/mic
+  micOn: true,
+  camOn: true,
+};
+
+// Free public STUN servers (Google + Cloudflare)
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  ]
+};
+
+async function startWebRTC(socket, session_id, isTeacher) {
+  // Get local camera + mic
+  try {
+    RTC.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch(e) {
+    // Camera denied or not available — continue without video
+    console.warn('Camera/mic unavailable:', e.message);
+    document.getElementById('video-waiting').innerHTML =
+      `<div style="font-size:11px;color:rgba(255,255,255,.4);text-align:center;padding:10px;">Camera not available<br><span style="font-size:10px;opacity:.7;">${e.message}</span></div>`;
+    return;
+  }
+
+  // Show local stream in PiP
+  const localVideo = document.getElementById('video-local');
+  if (localVideo) localVideo.srcObject = RTC.localStream;
+
+  // Create peer connection
+  RTC.pc = new RTCPeerConnection(RTC_CONFIG);
+
+  // Add local tracks to connection
+  RTC.localStream.getTracks().forEach(track => RTC.pc.addTrack(track, RTC.localStream));
+
+  // When remote track arrives — show partner video
+  RTC.pc.ontrack = (e) => {
+    const remoteVideo = document.getElementById('video-remote');
+    if (remoteVideo) {
+      remoteVideo.srcObject = e.streams[0];
+      const waiting = document.getElementById('video-waiting');
+      if (waiting) waiting.style.display = 'none';
+    }
+  };
+
+  // ICE candidate → send to partner via socket
+  RTC.pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      socket.emit('webrtc_ice', { session_id, candidate: e.candidate });
+    }
+  };
+
+  RTC.pc.onconnectionstatechange = () => {
+    const state = RTC.pc?.connectionState;
+    if (state === 'connected') {
+      const waiting = document.getElementById('video-waiting');
+      if (waiting) waiting.style.display = 'none';
+    }
+    if (state === 'disconnected' || state === 'failed') {
+      const waiting = document.getElementById('video-waiting');
+      if (waiting) { waiting.style.display = 'flex'; waiting.innerHTML = '<div style="font-size:11px;color:rgba(255,255,255,.4);">Partner disconnected</div>'; }
+    }
+  };
+
+  // Teacher creates the offer; student waits for it
+  if (isTeacher) {
+    const offer = await RTC.pc.createOffer();
+    await RTC.pc.setLocalDescription(offer);
+    socket.emit('webrtc_offer', { session_id, sdp: RTC.pc.localDescription });
+  }
+
+  // ── Socket signaling handlers ──
+  socket.on('webrtc_offer', async ({ sdp }) => {
+    if (!RTC.pc) return;
+    await RTC.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await RTC.pc.createAnswer();
+    await RTC.pc.setLocalDescription(answer);
+    socket.emit('webrtc_answer', { session_id, sdp: RTC.pc.localDescription });
+  });
+
+  socket.on('webrtc_answer', async ({ sdp }) => {
+    if (!RTC.pc) return;
+    await RTC.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  });
+
+  socket.on('webrtc_ice', async ({ candidate }) => {
+    if (!RTC.pc) return;
+    try { await RTC.pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+  });
+
+  // If student joins after teacher — teacher re-sends offer when student joins
+  socket.on('user_joined', async ({ role: partnerRole }) => {
+    if (isTeacher && RTC.pc && RTC.pc.signalingState === 'stable') {
+      // Re-negotiate so student gets the offer
+      try {
+        const offer = await RTC.pc.createOffer();
+        await RTC.pc.setLocalDescription(offer);
+        socket.emit('webrtc_offer', { session_id, sdp: RTC.pc.localDescription });
+      } catch(e) {}
+    }
+  });
+}
+
+function stopWebRTC() {
+  RTC.localStream?.getTracks().forEach(t => t.stop());
+  RTC.pc?.close();
+  RTC.pc = null;
+  RTC.localStream = null;
+}
+
+window.toggleMic = () => {
+  if (!RTC.localStream) return;
+  RTC.micOn = !RTC.micOn;
+  RTC.localStream.getAudioTracks().forEach(t => { t.enabled = RTC.micOn; });
+  const btn = document.getElementById('vc-mic');
+  if (btn) btn.classList.toggle('muted', !RTC.micOn);
+};
+
+window.toggleCam = () => {
+  if (!RTC.localStream) return;
+  RTC.camOn = !RTC.camOn;
+  RTC.localStream.getVideoTracks().forEach(t => { t.enabled = RTC.camOn; });
+  const btn = document.getElementById('vc-cam');
+  if (btn) btn.classList.toggle('muted', !RTC.camOn);
+  const localVideo = document.getElementById('video-local');
+  if (localVideo) localVideo.style.opacity = RTC.camOn ? '1' : '0.3';
+};
+
 window.backToDashboard = () => {
+  stopWebRTC();
   S.lesson.socket?.disconnect();
   S.lesson = { session_id: null, socket: null, pages: [], currentPageId: null, exercises: {}, responses: {}, notes: '', audioState: {} };
   S.params = {}; // clear stale session params
