@@ -1101,8 +1101,11 @@ function renderLessonShell() {
             <div id="dict-result"></div>
           </div>
           <div>
-            <div class="tool-label">Notes</div>
-            <textarea class="textarea" id="lesson-notes" placeholder="Shared notes…" rows="4" oninput="syncNotes(this.value)"></textarea>
+            <div class="tool-label" style="display:flex;align-items:center;justify-content:space-between;">
+              Notes
+              <span id="notes-typing-label" style="font-size:10px;color:var(--green);font-weight:500;opacity:0;transition:opacity .3s;"></span>
+            </div>
+            <textarea class="textarea" id="lesson-notes" placeholder="Shared notes — both teacher and student see these in real time…" rows="4" oninput="syncNotes(this.value)"></textarea>
           </div>
           <div>
             <div class="tool-label">Pages</div>
@@ -1176,6 +1179,12 @@ async function initLesson() {
     S.lesson.audioState = state.audio_state || {};
     S.lesson.responses = state.responses || {};
     if (state.pages) S.lesson.pages = state.pages;
+    // Restore saved notes
+    if (state.notes) {
+      const ta = document.getElementById('lesson-notes');
+      if (ta) ta.value = state.notes;
+      S.lesson.notes = state.notes;
+    }
     renderPagesNav();
     if (S.lesson.currentPageId) await loadPage(S.lesson.currentPageId);
   });
@@ -1212,10 +1221,20 @@ async function initLesson() {
     activity(`${by.name}: answered exercise`);
   });
 
-  // Notes
-  socket.on('notes_sync', ({ notes }) => {
+  // Notes sync - bidirectional
+  socket.on('notes_sync', ({ notes, by }) => {
     const ta = document.getElementById('lesson-notes');
-    if (ta && document.activeElement !== ta) ta.value = notes;
+    if (ta && document.activeElement !== ta) {
+      ta.value = notes;
+    }
+    // Show who is typing in notes
+    const label = document.getElementById('notes-typing-label');
+    if (label) {
+      label.textContent = `${by === 'teacher' ? '👩‍🏫 Teacher' : '👨‍🎓 Student'} is editing…`;
+      label.style.opacity = '1';
+      clearTimeout(label._t);
+      label._t = setTimeout(() => { label.style.opacity = '0'; }, 2000);
+    }
   });
 
   // Reveal hidden
