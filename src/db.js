@@ -166,6 +166,7 @@ async function initDB() {
       student_id INTEGER,
       current_page_id INTEGER,
       audio_state TEXT DEFAULT '{}',
+      notes TEXT DEFAULT '',
       started_at TEXT DEFAULT (datetime('now')),
       ended_at TEXT
     );
