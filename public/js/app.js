@@ -941,6 +941,7 @@ window.revokeAccess = async (sid, lid, name, color) => {
 window.startLesson = async (lessonId, studentId) => {
   const data = await POST('/api/sessions', { lesson_id: lessonId, student_id: studentId });
   if (!data) return;
+  toast(`Session started! Student will see a "Join Lesson" button automatically.`, 'success', 5000);
   S.params = { session_id: data.session_id, lesson_id: lessonId, role: 'teacher' };
   navigate('lesson');
 };
@@ -983,10 +984,33 @@ window.teacherOpenLessonDirect = async (lessonId) => {
 // STUDENT VIEWS
 // ══════════════════════════════════════════
 async function renderStudentLessons() {
-  const lessons = await GET('/api/student/lessons');
+  const [lessons, activeSessions] = await Promise.all([
+    GET('/api/student/lessons'),
+    GET('/api/student/active-sessions').catch(() => [])
+  ]);
+
   const el = document.getElementById('main-body');
+
+  // Active session banner
+  let activeBanner = '';
+  if (activeSessions.length > 0) {
+    const s = activeSessions[0];
+    activeBanner = `
+      <div style="background:linear-gradient(135deg,#ecfdf5,#d1fae5);border:1.5px solid rgba(5,150,105,.3);border-radius:14px;padding:20px 24px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--green);margin-bottom:4px;">🟢 Lesson in progress</div>
+          <div style="font-size:17px;font-weight:700;font-family:var(--font-d);">${escHtml(s.lesson_title)}</div>
+          <div style="font-size:13px;color:var(--text3);margin-top:2px;">Teacher: ${escHtml(s.teacher_name)} · ${escHtml(s.sec_name)} › ${escHtml(s.sub_name)}</div>
+        </div>
+        <button class="btn btn-green" onclick="joinActiveSession('${s.session_id}',${s.lesson_id})" style="flex-shrink:0;font-size:15px;padding:12px 24px;">
+          Join Lesson →
+        </button>
+      </div>`;
+  }
+
   el.innerHTML = `
     <div class="page-header"><h1>My Lessons</h1><p>Lessons your teacher has given you access to</p></div>
+    ${activeBanner}
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
       ${lessons.map(l=>`
         <div class="card">
@@ -994,38 +1018,35 @@ async function renderStudentLessons() {
             <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:5px;">${escHtml(l.sec_name)} › ${escHtml(l.sub_name)} · ${escHtml(l.level)}</div>
             <div style="font-family:var(--font-d);font-size:17px;font-weight:700;margin-bottom:6px;">${escHtml(l.title)}</div>
             <div class="text-sm text-muted" style="margin-bottom:14px;">${escHtml(l.description||'')}</div>
-            <div class="flex items-center gap-2">
-              <div id="join-${l.id}"></div>
-            </div>
+            <button class="btn btn-secondary btn-sm" onclick="studentJoinPrompt(${l.id})">Self-study</button>
           </div>
         </div>`).join('')}
       ${lessons.length===0?'<p class="text-muted">No lessons yet. Your teacher will grant you access to lessons.</p>':''}
     </div>`;
 
-  // Check for active sessions for this student
-  // (In production, student would be notified via socket; here we poll)
-  checkStudentSessions(lessons);
+  // Poll for active sessions every 10 seconds
+  clearInterval(S._sessionPoll);
+  S._sessionPoll = setInterval(async () => {
+    const active = await GET('/api/student/active-sessions').catch(() => []);
+    if (active.length > 0 && S.view === 'student-lessons') {
+      renderStudentLessons();
+    }
+  }, 10000);
 }
 
-async function checkStudentSessions(lessons) {
-  // For demo: show "Join" button — student enters session_id manually or via link
-  lessons.forEach(l => {
-    const el = document.getElementById(`join-${l.id}`);
-    if (!el) return;
-    el.innerHTML = `
-      <button class="btn btn-primary btn-sm" onclick="studentJoinPrompt(${l.id})">Join Lesson</button>`;
-  });
-}
+window.joinActiveSession = (sessionId, lessonId) => {
+  clearInterval(S._sessionPoll);
+  S.params = { session_id: sessionId, lesson_id: lessonId, role: 'student' };
+  navigate('lesson');
+};
 
 window.studentJoinPrompt = (lessonId) => {
-  modal('Join Lesson', `
-    <p class="text-sm text-muted" style="margin-bottom:10px;">Enter the session ID your teacher shared, or leave blank to create a self-study session.</p>
-    <div class="form-row"><label class="label">Session ID</label><input class="input" id="m-sid" placeholder="paste session ID here…"></div>
-    <p class="text-xs text-muted" style="margin-top:6px;">Tip: teacher copies the session ID from their lesson screen top bar.</p>
+  modal('Self-study / Join with ID', `
+    <p class="text-sm text-muted" style="margin-bottom:10px;">Leave blank to start a self-study session, or paste a session ID your teacher shared.</p>
+    <div class="form-row"><label class="label">Session ID <span class="text-muted">(optional)</span></label><input class="input" id="m-sid" placeholder="paste session ID here…"></div>
   `, async (bd) => {
     let sessionId = bd.querySelector('#m-sid').value.trim();
     if (!sessionId) {
-      // create self-study session
       const data = await POST('/api/sessions', { lesson_id: lessonId, student_id: S.user.id });
       if (!data) return;
       sessionId = data.session_id;
@@ -1045,7 +1066,7 @@ function renderLessonShell() {
       <div style="font-family:var(--font-d);font-size:16px;">english<span style="color:var(--accent);">school</span>.pro</div>
       <div style="width:1px;height:20px;background:var(--border);"></div>
       <div id="lesson-title-bar" style="font-size:13px;font-weight:500;color:var(--text3);">Loading…</div>
-      <div id="lesson-session-id" style="font-size:11px;color:var(--text4);"></div>
+      <div id="lesson-session-id"></div>
       <div id="lesson-status" style="margin-left:8px;"></div>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
         <div id="partner-status"></div>
@@ -1119,7 +1140,18 @@ async function initLesson() {
   S.lesson.currentPageId = session.current_page_id;
 
   // Show session ID for sharing
-  document.getElementById('lesson-session-id').textContent = `Session: ${session_id.slice(0,8)}…`;
+  // Show session ID with copy button (teacher needs to share this with student)
+  const sidEl = document.getElementById('lesson-session-id');
+  if (role === 'teacher') {
+    sidEl.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px;background:var(--accent-s,#eef3fd);border:1px solid rgba(37,99,235,.25);border-radius:6px;padding:4px 10px;">
+        <span style="font-size:11px;color:var(--text3,#6b7280);font-weight:500;">Session ID:</span>
+        <code style="font-size:12px;font-weight:700;color:var(--accent,#2563eb);letter-spacing:.03em;">${session_id.slice(0,8).toUpperCase()}</code>
+        <button onclick="copySessionId('${session_id}')" style="border:none;background:none;cursor:pointer;padding:2px 4px;border-radius:4px;color:var(--accent,#2563eb);font-size:11px;font-weight:600;" title="Copy full session ID">📋 Copy</button>
+      </div>`;
+  } else {
+    sidEl.innerHTML = `<span style="font-size:11px;color:var(--text4,#9ca3af);">Session active</span>`;
+  }
   document.getElementById('lesson-title-bar').textContent =
     `Lesson ${session.lesson_id}${role === 'teacher' ? ' — Teacher View' : ' — Student View'}`;
 
@@ -1637,6 +1669,10 @@ window.lookupWord = (val) => {
 window.endSession = () => {
   if (!confirm('End this lesson for everyone?')) return;
   S.lesson.socket?.emit('end_session', { session_id: S.lesson.session_id });
+};
+
+window.copySessionId = (sid) => {
+  navigator.clipboard.writeText(sid).then(() => toast('Session ID copied! Share it with your student.', 'success', 4000));
 };
 
 window.backToDashboard = () => {
