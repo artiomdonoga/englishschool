@@ -316,12 +316,17 @@ io.on('connection', (socket) => {
     db.all('SELECT * FROM exercise_responses WHERE session_id=?', session_id)
       .forEach(r => { responses[r.exercise_id] = JSON.parse(r.response); });
 
+    const audioState = JSON.parse(session.audio_state || '{}');
+    const savedNotes = audioState._notes || '';
+    delete audioState._notes;
+
     socket.emit('session_state', {
       session,
       pages,
-      audio_state: JSON.parse(session.audio_state||'{}'),
+      audio_state: audioState,
       responses,
-      current_page_id: session.current_page_id
+      current_page_id: session.current_page_id,
+      notes: savedNotes
     });
     io.to(session_id).emit('user_joined', { role, name, userId });
   });
@@ -347,6 +352,18 @@ io.on('connection', (socket) => {
   });
 
   socket.on('notes_sync', ({ session_id, notes }) => {
+    // Save notes to DB so they persist and restore on join
+    db.prepare('UPDATE lesson_sessions SET audio_state=audio_state WHERE id=?').run(session_id); // keep alive
+    try {
+      const sess = db.get('SELECT * FROM lesson_sessions WHERE id=?', session_id);
+      if (sess) {
+        const audioState = JSON.parse(sess.audio_state || '{}');
+        audioState._notes = notes;
+        db.prepare('UPDATE lesson_sessions SET audio_state=? WHERE id=?')
+          .run(JSON.stringify(audioState), session_id);
+      }
+    } catch(e) {}
+    // Broadcast to everyone else in the room
     socket.to(session_id).emit('notes_sync', { notes, by: role });
   });
 
