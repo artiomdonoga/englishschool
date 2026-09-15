@@ -19,7 +19,7 @@ function persist() {
   }
 }
 
-// Wrap sql.js to look like better-sqlite3 (synchronous API via prepare/run/get/all)
+// Wrap sql.js API to be synchronous (prepare/run/get/all)
 function makeWrapper(sqlJsDb) {
   return {
     prepare(sql) {
@@ -236,22 +236,120 @@ async function initDB() {
     persist();
     const p4 = _db.get(`SELECT id FROM lesson_pages WHERE lesson_id=? AND title=?`, lesId, 'Grammar');
 
-    // Exercises
+
+    // Exercises — rich demo covering all types
     const execs = [
-      [p1.id,'text',JSON.stringify({heading:'Warm Up',text:'Discuss: What sports do you enjoy? Have you been to a live sports event?'}),0],
-      [p1.id,'multiple_choice',JSON.stringify({question:'Which is NOT a football role?',options:['Referee','Goalkeeper','Commentator','Pitcher'],correct:3}),1],
-      [p2.id,'teacher_note',JSON.stringify({text:'Play the audio twice. Ask students to note unfamiliar words.',can_show:true}),0],
-      [p2.id,'audio',JSON.stringify({title:'Interview with a Football Referee',duration:138,url:''}),1],
-      [p2.id,'dropdown',JSON.stringify({sentences:[{before:'The referee',blank:{options:['blow','blew','blown'],correct:'blew'},after:'his whistle.'},{before:'She has been',blank:{options:['work','works','working'],correct:'working'},after:'as a referee for three years.'}]}),2],
-      [p3.id,'image_match',JSON.stringify({pairs:[{image:'🏟️',label:'stadium'},{image:'🧑‍⚖️',label:'referee'},{image:'🟨',label:'yellow card'},{image:'⚽',label:'goal'}]}),0],
-      [p3.id,'matching',JSON.stringify({pairs:[{a:'to blow a whistle',b:'signal a decision'},{a:'penalty kick',b:'foul inside the box'},{a:'offside rule',b:'player ahead of the ball'}]}),1],
-      [p4.id,'fill_blank_type',JSON.stringify({sentences:[{before:'The crowd went silent when the player',answer:'collapsed',after:'suddenly.'},{before:'A',answer:'penalty',after:'kick was awarded.'}]}),0],
-      [p4.id,'fill_blank_hint',JSON.stringify({sentences:[{before:'The team was',hint:'exhaust →',answer:'exhausted',after:'after ninety minutes.'},{before:'She is one of the most',hint:'experience →',answer:'experienced',after:'referees.'}]}),1],
+
+      // ── PAGE 1: Warm Up ──────────────────────────────────────
+      [p1.id,'text',JSON.stringify({
+        heading:'🏟️ Sports & Language — Upper Intermediate',
+        text:'In this lesson we will explore sports vocabulary, practise listening comprehension, and work on grammar structures used when talking about sports events.\n\nLook at the questions below and discuss them with your teacher before we begin.'
+      }),0],
+      [p1.id,'teacher_note',JSON.stringify({
+        text:'Ask the student to speak for at least 2 minutes before moving on. Listen for: use of present perfect vs past simple, sports-related collocations, and fluency. Note any errors to return to in the Grammar page.',
+        can_show:false
+      }),1],
+      [p1.id,'multiple_choice',JSON.stringify({
+        question:'Which of the following phrases means a match ended with the same score for both teams?',
+        options:['A clean sheet','A draw','An own goal','A hat-trick'],
+        correct:1
+      }),2],
+      [p1.id,'multiple_choice',JSON.stringify({
+        question:'In football, what does a yellow card mean?',
+        options:['The player is sent off immediately','A formal warning to the player','The game is paused for injury','A penalty kick is awarded'],
+        correct:1
+      }),3],
+
+      // ── PAGE 2: Listening ─────────────────────────────────────
+      [p2.id,'teacher_note',JSON.stringify({
+        text:'TEACHER INSTRUCTIONS: Play the audio twice. First listen: students focus on the general topic. Second listen: students answer the comprehension questions below.\n\nKey vocabulary to pre-teach: referee, offside, penalty shootout, substitute.',
+        can_show:true
+      }),0],
+      [p2.id,'audio',JSON.stringify({
+        title:'Sports Commentary: Championship Final',
+        duration:156,
+        url:''
+      }),1],
+      [p2.id,'dropdown',JSON.stringify({
+        sentences:[
+          {before:'The referee',blank:{options:['blow','blew','has blown','blown'],correct:'blew'},after:'his whistle to signal the end of the match.'},
+          {before:'By the time the goalkeeper',blank:{options:['react','reacted','has reacted','reacting'],correct:'reacted'},after:'the ball was already in the net.'},
+          {before:'The home team',blank:{options:['has been winning','won','wins','have won'],correct:'has been winning'},after:'three consecutive championships.'},
+          {before:'She',blank:{options:['referee','refereed','refereeing','has referee'],correct:'refereed'},after:'her first professional match at the age of twenty-four.'},
+        ]
+      }),2],
+      [p2.id,'multiple_choice',JSON.stringify({
+        question:'According to the commentary, why was a penalty awarded?',
+        options:['The goalkeeper handled the ball outside the box','A defender committed a foul inside the penalty area','The ball crossed the goal line','A player was in an offside position'],
+        correct:1
+      }),3],
+
+      // ── PAGE 3: Vocabulary ────────────────────────────────────
+      [p3.id,'text',JSON.stringify({
+        heading:'Sports Vocabulary',
+        text:'Work through the vocabulary exercises below. Drag the correct labels to the images, then match the collocations in the second exercise.'
+      }),0],
+      [p3.id,'image_match',JSON.stringify({
+        pairs:[
+          {image:'🏟️',label:'stadium'},
+          {image:'🧑‍⚖️',label:'referee'},
+          {image:'🟨',label:'yellow card'},
+          {image:'🟥',label:'red card'},
+          {image:'⚽',label:'goal'},
+          {image:'🚩',label:'offside flag'},
+        ]
+      }),1],
+      [p3.id,'matching',JSON.stringify({
+        pairs:[
+          {a:'blow a whistle',b:'signal a decision'},
+          {a:'score a penalty',b:'kick from the spot'},
+          {a:'commit a foul',b:'break the rules'},
+          {a:'save a shot',b:'goalkeeper stops the ball'},
+          {a:'substitute a player',b:'bring someone on from the bench'},
+        ]
+      }),2],
+      [p3.id,'fill_blank_type',JSON.stringify({
+        sentences:[
+          {before:'The striker',answer:'scored',after:'a hat-trick in the second half.'},
+          {before:'The referee showed him a',answer:'red',after:'card and he had to leave the pitch.'},
+          {before:'The goalkeeper made an incredible',answer:'save',after:'in the final minute of the match.'},
+          {before:'After ninety minutes the score was level, so the match went to a',answer:'penalty',after:'shootout.'},
+        ]
+      }),3],
+
+      // ── PAGE 4: Grammar ───────────────────────────────────────
+      [p4.id,'text',JSON.stringify({
+        heading:'Grammar Focus: Past Simple vs Present Perfect',
+        text:'Sports commentary and reporting use a mix of past simple and present perfect. Study the examples then complete the exercises below.'
+      }),0],
+      [p4.id,'teacher_note',JSON.stringify({
+        text:'Remind the student of the key rule: Past Simple = finished time reference ("She won in 2019"). Present Perfect = connection to now / unfinished time ("She has won three times"). Common error: "She has won yesterday" — show them why this is wrong.',
+        can_show:true
+      }),1],
+      [p4.id,'fill_blank_hint',JSON.stringify({
+        sentences:[
+          {before:'The team',hint:'exhaust →',answer:'exhausted',after:'all their substitutes by the seventy-fifth minute.'},
+          {before:'She is one of the most',hint:'experience →',answer:'experienced',after:'referees in the country.'},
+          {before:'The young striker is',hint:'amaze →',answer:'amazing',after:'everyone with his performances this season.'},
+          {before:'The match was',hint:'disappoint →',answer:'disappointing',after:'for the fans who had travelled so far.'},
+          {before:'It was a',hint:'thrill →',answer:'thrilling',after:'final that no one will forget.'},
+        ]
+      }),2],
+      [p4.id,'dropdown',JSON.stringify({
+        sentences:[
+          {before:'She',blank:{options:['wins','won','has won','had won'],correct:'has won'},after:'four gold medals throughout her career.'},
+          {before:'The team',blank:{options:['trains','trained','has trained','had trained'],correct:'trained'},after:'twice a day before the championship.'},
+          {before:'I',blank:{options:['never see','never saw','have never seen','had never seen'],correct:'have never seen'},after:'such a dramatic penalty shootout.'},
+          {before:'The referee',blank:{options:['announces','announced','has announced','had announced'],correct:'announced'},after:'the result three hours ago.'},
+        ]
+      }),3],
     ];
+
     for (const [pid,type,data,order] of execs) {
       sqlJsDb.run(`INSERT INTO exercises (page_id,type,data,sort_order) VALUES (?,?,?,?)`, [pid,type,data,order]);
       persist();
     }
+
 
     console.log('✅ Database seeded with demo data');
   }
