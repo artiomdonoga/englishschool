@@ -93,9 +93,9 @@ function modal(title, bodyHtml, onConfirm, confirmLabel = 'Save', confirmClass =
 }
 
 // ─── ROUTER ──────────────────────────────
-function navigate(view, params = {}) {
+function navigate(view, params) {
   S.view = view;
-  S.params = params;
+  if (params !== undefined) S.params = params; // only overwrite if explicitly passed
   render();
 }
 
@@ -949,8 +949,7 @@ window.startLesson = async (lessonId, studentId) => {
   const data = await POST('/api/sessions', { lesson_id: lessonId, student_id: studentId });
   if (!data) return;
   toast(`Session started! Student will see a "Join Lesson" button automatically.`, 'success', 5000);
-  S.params = { session_id: data.session_id, lesson_id: lessonId, role: 'teacher' };
-  navigate('lesson');
+  navigate('lesson', { session_id: data.session_id, lesson_id: lessonId, role: 'teacher' });
 };
 
 async function renderTeacherCurriculum() {
@@ -983,8 +982,7 @@ async function renderTeacherCurriculum() {
 window.teacherOpenLessonDirect = async (lessonId) => {
   const data = await POST('/api/sessions', { lesson_id: lessonId, student_id: null });
   if (!data) return;
-  S.params = { session_id: data.session_id, lesson_id: lessonId, role: 'teacher' };
-  navigate('lesson');
+  navigate('lesson', { session_id: data.session_id, lesson_id: lessonId, role: 'teacher' });
 };
 
 // ══════════════════════════════════════════
@@ -1043,8 +1041,7 @@ async function renderStudentLessons() {
 
 window.joinActiveSession = (sessionId, lessonId) => {
   clearInterval(S._sessionPoll);
-  S.params = { session_id: sessionId, lesson_id: lessonId, role: 'student' };
-  navigate('lesson');
+  navigate('lesson', { session_id: sessionId, lesson_id: lessonId, role: 'student' });
 };
 
 window.studentJoinPrompt = (lessonId) => {
@@ -1058,8 +1055,7 @@ window.studentJoinPrompt = (lessonId) => {
       if (!data) return;
       sessionId = data.session_id;
     }
-    S.params = { session_id: sessionId, lesson_id: lessonId, role: 'student' };
-    navigate('lesson');
+    navigate('lesson', { session_id: sessionId, lesson_id: lessonId, role: 'student' });
   }, 'Join');
 };
 
