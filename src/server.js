@@ -373,6 +373,12 @@ io.on('connection', (socket) => {
     io.to(session_id).emit('session_ended');
   });
 
+  // ── WebRTC signaling relay ─────────────
+  // Server just relays these to the other participant — never inspects them
+  socket.on('webrtc_offer',  ({ session_id, sdp })       => socket.to(session_id).emit('webrtc_offer',  { sdp }));
+  socket.on('webrtc_answer', ({ session_id, sdp })       => socket.to(session_id).emit('webrtc_answer', { sdp }));
+  socket.on('webrtc_ice',    ({ session_id, candidate }) => socket.to(session_id).emit('webrtc_ice',    { candidate }));
+
   socket.on('disconnect', () => {
     if (socket.session_id) io.to(socket.session_id).emit('user_left', { role, name });
   });
