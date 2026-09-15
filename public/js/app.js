@@ -1137,7 +1137,16 @@ async function initLesson() {
   // Get session
   let session;
   try { session = await GET(`/api/sessions/${session_id}`); }
-  catch { toast('Session not found', 'error'); return; }
+  catch {
+    toast('Session not found — please start a new lesson.', 'error', 5000);
+    setTimeout(() => backToDashboard(), 2000);
+    return;
+  }
+  if (!session) {
+    toast('Session not found — please start a new lesson.', 'error', 5000);
+    setTimeout(() => backToDashboard(), 2000);
+    return;
+  }
 
   S.lesson.session_id = session_id;
   S.lesson.currentPageId = session.current_page_id;
@@ -1155,11 +1164,13 @@ async function initLesson() {
   } else {
     sidEl.innerHTML = `<span style="font-size:11px;color:var(--text4,#9ca3af);">Session active</span>`;
   }
-  document.getElementById('lesson-title-bar').textContent =
-    `Lesson ${session.lesson_id}${role === 'teacher' ? ' — Teacher View' : ' — Student View'}`;
 
-  // Load pages
+  // Load pages + first page immediately via REST — don't wait for socket
   S.lesson.pages = await GET(`/api/lessons/${session.lesson_id}/pages`);
+  document.getElementById('lesson-title-bar').textContent =
+    `Sports & Language${role === 'teacher' ? ' — Teacher' : ' — Student'}`;
+  renderPagesNav();
+  if (S.lesson.currentPageId) await loadPage(S.lesson.currentPageId);
 
   // Connect socket
   const socket = io({ auth: { token: S.token } });
@@ -1175,18 +1186,20 @@ async function initLesson() {
   });
 
   socket.on('session_state', async (state) => {
-    S.lesson.currentPageId = state.current_page_id;
     S.lesson.audioState = state.audio_state || {};
     S.lesson.responses = state.responses || {};
-    if (state.pages) S.lesson.pages = state.pages;
     // Restore saved notes
-    if (state.notes) {
-      const ta = document.getElementById('lesson-notes');
-      if (ta) ta.value = state.notes;
+    const ta = document.getElementById('lesson-notes');
+    if (state.notes && ta) {
+      ta.value = state.notes;
       S.lesson.notes = state.notes;
     }
-    renderPagesNav();
-    if (S.lesson.currentPageId) await loadPage(S.lesson.currentPageId);
+    // Apply any saved exercise responses to current page
+    if (Object.keys(S.lesson.responses).length > 0) {
+      Object.entries(S.lesson.responses).forEach(([exId, resp]) => applyExerciseResponse(+exId, resp));
+    }
+    // Apply audio state
+    Object.values(S.lesson.audioState).forEach(s => applyAudioState(s));
   });
 
   socket.on('user_joined', ({ role: r, name }) => {
