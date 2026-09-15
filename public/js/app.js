@@ -1727,6 +1727,7 @@ window.copySessionId = (sid) => {
 const RTC = {
   pc: null,
   localStream: null,
+  remoteStream: null,
   micOn: true,
   camOn: true,
 };
@@ -1736,120 +1737,171 @@ const RTC_CONFIG = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun2.l.google.com:19302' },
   ]
 };
 
 async function startWebRTC(socket, session_id, isTeacher) {
   // Get local camera + mic
   try {
-    RTC.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    RTC.localStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: { echoCancellation: true, noiseSuppression: true }
+    });
   } catch(e) {
     console.warn('Camera/mic unavailable:', e.message);
     const w = document.getElementById('video-waiting');
-    if (w) w.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,.4);text-align:center;padding:10px;">Camera not available</div>`;
+    if (w) w.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,.4);text-align:center;padding:12px;">📷 Camera not available<br><span style="font-size:10px;opacity:.6;">${e.name}</span></div>`;
     return;
   }
 
-  // Show own video in PiP immediately
+  // Show own video immediately
   const localVideo = document.getElementById('video-local');
-  if (localVideo) localVideo.srcObject = RTC.localStream;
+  if (localVideo) {
+    localVideo.srcObject = RTC.localStream;
+    localVideo.play().catch(()=>{});
+  }
 
-  function createPC() {
-    if (RTC.pc) { try { RTC.pc.close(); } catch(e){} }
-    RTC.pc = new RTCPeerConnection(RTC_CONFIG);
+  // Create a single remote MediaStream to collect incoming tracks
+  RTC.remoteStream = new MediaStream();
+  const remoteVideo = document.getElementById('video-remote');
+  if (remoteVideo) {
+    remoteVideo.srcObject = RTC.remoteStream;
+  }
 
-    // Add local tracks
-    RTC.localStream.getTracks().forEach(track => RTC.pc.addTrack(track, RTC.localStream));
+  function buildPC() {
+    if (RTC.pc) { try { RTC.pc.close(); } catch(e){} RTC.pc = null; }
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    RTC.pc = pc;
 
-    // Remote track → show partner video
-    RTC.pc.ontrack = (e) => {
-      const remoteVideo = document.getElementById('video-remote');
-      if (remoteVideo && e.streams[0]) {
-        remoteVideo.srcObject = e.streams[0];
-        const w = document.getElementById('video-waiting');
-        if (w) w.style.display = 'none';
+    // Add all local tracks
+    RTC.localStream.getTracks().forEach(track => pc.addTrack(track, RTC.localStream));
+
+    // Each incoming track gets added to remoteStream, then we play
+    pc.ontrack = (e) => {
+      console.log('ontrack fired, kind:', e.track.kind, 'streams:', e.streams.length);
+      e.track.onunmute = () => {
+        RTC.remoteStream.addTrack(e.track);
+        const rv = document.getElementById('video-remote');
+        if (rv) {
+          rv.srcObject = RTC.remoteStream;
+          rv.play().catch(err => console.warn('play error:', err));
+          const w = document.getElementById('video-waiting');
+          if (w) w.style.display = 'none';
+        }
+      };
+      // Also add immediately in case unmute already happened
+      if (e.track.readyState === 'live') {
+        RTC.remoteStream.addTrack(e.track);
+        const rv = document.getElementById('video-remote');
+        if (rv) {
+          rv.srcObject = RTC.remoteStream;
+          rv.play().catch(err => console.warn('play error:', err));
+          const w = document.getElementById('video-waiting');
+          if (w) w.style.display = 'none';
+        }
       }
     };
 
-    // ICE candidates → relay via socket
-    RTC.pc.onicecandidate = (e) => {
+    pc.onicecandidate = (e) => {
       if (e.candidate) socket.emit('webrtc_ice', { session_id, candidate: e.candidate });
     };
 
-    RTC.pc.onconnectionstatechange = () => {
-      const state = RTC.pc?.connectionState;
+    pc.onconnectionstatechange = () => {
+      console.log('RTC state:', pc.connectionState);
       const w = document.getElementById('video-waiting');
-      if (state === 'connected' && w) w.style.display = 'none';
-      if ((state === 'disconnected' || state === 'failed') && w) {
-        w.style.display = 'flex';
-        w.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,.4);">Partner disconnected</div>`;
+      if (pc.connectionState === 'connected') {
+        if (w) w.style.display = 'none';
+        toast('Video connected!', 'success', 2000);
+      }
+      if (pc.connectionState === 'failed') {
+        if (w) { w.style.display = 'flex'; w.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,.4);">Connection failed</div>`; }
       }
     };
 
-    return RTC.pc;
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE state:', pc.iceConnectionState);
+    };
+
+    return pc;
   }
 
-  // ── TEACHER flow ──────────────────────────
-  // Teacher waits for student to signal "ready", then sends offer
+  // ── TEACHER ───────────────────────────────
   if (isTeacher) {
-    createPC();
+    buildPC();
 
-    // Student joined → send offer
-    socket.on('webrtc_ready', async () => {
+    const sendOffer = async () => {
       try {
-        const offer = await RTC.pc.createOffer();
+        // Recreate PC for clean state
+        buildPC();
+        const offer = await RTC.pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
         await RTC.pc.setLocalDescription(offer);
         socket.emit('webrtc_offer', { session_id, sdp: RTC.pc.localDescription });
-      } catch(e) { console.error('Offer error:', e); }
-    });
+        console.log('Offer sent');
+      } catch(e) { console.error('sendOffer error:', e); }
+    };
 
-    // Receive answer from student
+    socket.on('webrtc_ready', sendOffer);
     socket.on('webrtc_answer', async ({ sdp }) => {
       try {
-        if (RTC.pc.signalingState === 'have-local-offer') {
+        if (RTC.pc && RTC.pc.signalingState === 'have-local-offer') {
           await RTC.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          console.log('Answer applied');
         }
-      } catch(e) { console.error('Answer error:', e); }
+      } catch(e) { console.error('setAnswer error:', e); }
     });
 
-    // If student was already in the room when teacher joined, signal ready immediately
+    // Announce teacher is ready — if student is already there, they'll trigger webrtc_ready back
     socket.emit('webrtc_teacher_ready', { session_id });
   }
 
-  // ── STUDENT flow ──────────────────────────
-  // Student signals ready, then waits for offer
+  // ── STUDENT ───────────────────────────────
   if (!isTeacher) {
-    createPC();
+    buildPC();
 
-    // Tell teacher "I'm here, send me an offer"
-    socket.emit('webrtc_ready', { session_id });
-
-    // Also handle case where teacher was already ready
-    socket.on('webrtc_teacher_ready', async () => {
-      // Teacher is already there — signal back so teacher sends offer
+    socket.on('webrtc_teacher_ready', () => {
       socket.emit('webrtc_ready', { session_id });
     });
 
-    // Receive offer → send answer
     socket.on('webrtc_offer', async ({ sdp }) => {
       try {
-        createPC(); // fresh PC for each offer
+        console.log('Offer received, building answer...');
+        buildPC(); // fresh PC for this offer
         await RTC.pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await RTC.pc.createAnswer();
         await RTC.pc.setLocalDescription(answer);
         socket.emit('webrtc_answer', { session_id, sdp: RTC.pc.localDescription });
+        console.log('Answer sent');
       } catch(e) { console.error('Answer error:', e); }
     });
+
+    // Signal ready to trigger teacher's offer
+    socket.emit('webrtc_ready', { session_id });
   }
 
-  // ── ICE candidates (both sides) ───────────
+  // ── ICE (both sides) ──────────────────────
+  // Buffer candidates that arrive before remote description is set
+  const iceBuf = [];
   socket.on('webrtc_ice', async ({ candidate }) => {
     try {
-      if (RTC.pc && RTC.pc.remoteDescription) {
+      if (RTC.pc?.remoteDescription?.type) {
         await RTC.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } else {
+        iceBuf.push(candidate);
       }
-    } catch(e) {}
+    } catch(e) { console.warn('ICE error:', e.message); }
   });
+
+  // Flush buffered ICE after remote description is set
+  const origSetRemote = RTCPeerConnection.prototype.setRemoteDescription;
+  RTCPeerConnection.prototype.setRemoteDescription = async function(...args) {
+    await origSetRemote.apply(this, args);
+    if (this === RTC.pc && iceBuf.length) {
+      for (const c of iceBuf.splice(0)) {
+        try { await this.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
+      }
+    }
+  };
 }
 
 function stopWebRTC() {
