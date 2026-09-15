@@ -13,6 +13,16 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
+// Force HTTPS in production (Railway sets X-Forwarded-Proto)
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
+    if (req.headers['x-forwarded-proto'] === 'http') {
+      return res.redirect(301, 'https://' + req.headers.host + req.url);
+    }
+  }
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -374,10 +384,11 @@ io.on('connection', (socket) => {
   });
 
   // ── WebRTC signaling relay ─────────────
-  // Server just relays these to the other participant — never inspects them
-  socket.on('webrtc_offer',  ({ session_id, sdp })       => socket.to(session_id).emit('webrtc_offer',  { sdp }));
-  socket.on('webrtc_answer', ({ session_id, sdp })       => socket.to(session_id).emit('webrtc_answer', { sdp }));
-  socket.on('webrtc_ice',    ({ session_id, candidate }) => socket.to(session_id).emit('webrtc_ice',    { candidate }));
+  socket.on('webrtc_offer',         ({ session_id, sdp })       => socket.to(session_id).emit('webrtc_offer',         { sdp }));
+  socket.on('webrtc_answer',        ({ session_id, sdp })       => socket.to(session_id).emit('webrtc_answer',        { sdp }));
+  socket.on('webrtc_ice',           ({ session_id, candidate }) => socket.to(session_id).emit('webrtc_ice',           { candidate }));
+  socket.on('webrtc_ready',         ({ session_id })            => socket.to(session_id).emit('webrtc_ready'));
+  socket.on('webrtc_teacher_ready', ({ session_id })            => socket.to(session_id).emit('webrtc_teacher_ready'));
 
   socket.on('disconnect', () => {
     if (socket.session_id) io.to(socket.session_id).emit('user_left', { role, name });
