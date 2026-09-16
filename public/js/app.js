@@ -390,18 +390,350 @@ window.deleteLink = (tid, sid) => {
 };
 
 // ─── ADMIN CURRICULUM ────────────────────
+// State for the 3-column panel
+const CUR = { sectionId: null, subsectionId: null, lessonId: null, pageId: null };
+
 async function renderAdminCurriculum() {
   const el = document.getElementById('main-body');
   el.innerHTML = `
-    <div class="page-header flex items-center justify-between">
-      <div><h1>Curriculum Editor</h1><p>Manage sections, lessons, pages and exercises</p></div>
+    <div class="page-header">
+      <h1>Curriculum Editor</h1>
+      <p>Categories → Levels → Lessons → Pages → Exercises</p>
     </div>
-    <div class="admin-grid">
-      <div id="curriculum-tree-panel"></div>
-      <div id="curriculum-editor-panel"><div class="text-muted" style="padding:20px;">Select a lesson to edit its pages and exercises.</div></div>
-    </div>`;
-  await loadCurriculumTree();
+    <div id="cur-layout" style="display:grid;grid-template-columns:220px 220px 1fr;gap:16px;align-items:start;">
+      <div id="cur-col-sections"></div>
+      <div id="cur-col-subsections" style="opacity:.4;pointer-events:none;"></div>
+      <div id="cur-col-lessons" style="opacity:.4;pointer-events:none;"></div>
+    </div>
+    <div id="cur-lesson-editor" style="margin-top:16px;"></div>`;
+  await curLoadSections();
 }
+
+// ── Column 1: Categories (Sections) ──────
+async function curLoadSections() {
+  const sections = await GET('/api/sections');
+  const col = document.getElementById('cur-col-sections');
+  col.innerHTML = `
+    <div class="card" style="overflow:hidden;">
+      <div class="card-header" style="padding:12px 14px;">
+        <div class="card-title" style="font-size:13px;">📚 Categories</div>
+        <button class="btn btn-primary btn-xs" onclick="curAddSection()">+ Add</button>
+      </div>
+      <div style="padding:6px;">
+        ${sections.length === 0 ? `<p class="text-muted text-sm" style="padding:10px;">No categories yet.<br>Click + Add to create one.</p>` : ''}
+        ${sections.map(s => `
+          <div class="cur-item ${CUR.sectionId===s.id?'cur-item-active':''}" onclick="curSelectSection(${s.id},'${escHtml(s.name)}')">
+            <span style="flex:1;font-weight:${CUR.sectionId===s.id?'600':'400'};">${escHtml(s.name)}</span>
+            <div class="cur-item-btns">
+              <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curEditSection(${s.id},'${escHtml(s.name)}')" title="Rename">✏️</button>
+              <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curDeleteSection(${s.id})" title="Delete">🗑️</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+window.curSelectSection = async (id, name) => {
+  CUR.sectionId = id; CUR.subsectionId = null; CUR.lessonId = null; CUR.pageId = null;
+  // Highlight
+  document.querySelectorAll('.cur-item').forEach(e => e.classList.remove('cur-item-active'));
+  event.currentTarget?.classList.add('cur-item-active');
+  // Unlock col 2, reset col 3
+  const col2 = document.getElementById('cur-col-subsections');
+  const col3 = document.getElementById('cur-col-lessons');
+  col2.style.opacity = '1'; col2.style.pointerEvents = 'auto';
+  col3.style.opacity = '.4'; col3.style.pointerEvents = 'none';
+  document.getElementById('cur-lesson-editor').innerHTML = '';
+  await curLoadSubsections(id, name);
+};
+
+window.curAddSection = () => modal('Add Category', `
+  <div class="form-row"><label class="label">Category name</label>
+  <input class="input" id="m-name" placeholder="e.g. General English, Business English, IT…"></div>
+`, async (bd) => {
+  const name = bd.querySelector('#m-name').value.trim();
+  if (!name) throw new Error('Name required');
+  await POST('/api/sections', { name });
+  toast('Category added', 'success');
+  await curLoadSections();
+});
+
+window.curEditSection = (id, name) => modal('Rename Category', `
+  <div class="form-row"><label class="label">Category name</label>
+  <input class="input" id="m-name" value="${escHtml(name)}"></div>
+`, async (bd) => {
+  await PUT(`/api/sections/${id}`, { name: bd.querySelector('#m-name').value.trim() });
+  toast('Updated', 'success');
+  if (CUR.sectionId === id) CUR.sectionId = null;
+  await renderAdminCurriculum();
+});
+
+window.curDeleteSection = (id) => {
+  if (!confirm('Delete this category and ALL its content?')) return;
+  DEL(`/api/sections/${id}`).then(async () => {
+    toast('Deleted', 'success');
+    if (CUR.sectionId === id) { CUR.sectionId = null; CUR.subsectionId = null; CUR.lessonId = null; }
+    await renderAdminCurriculum();
+  });
+};
+
+// ── Column 2: Levels (Subsections) ───────
+async function curLoadSubsections(sectionId, sectionName) {
+  const subs = await GET(`/api/sections/${sectionId}/subsections`);
+  const col = document.getElementById('cur-col-subsections');
+  col.innerHTML = `
+    <div class="card" style="overflow:hidden;">
+      <div class="card-header" style="padding:12px 14px;">
+        <div class="card-title" style="font-size:13px;">🎓 Levels <span style="color:var(--accent);font-weight:400;font-size:11px;">${escHtml(sectionName)}</span></div>
+        <button class="btn btn-primary btn-xs" onclick="curAddSubsection(${sectionId})">+ Add</button>
+      </div>
+      <div style="padding:6px;">
+        ${subs.length === 0 ? `<p class="text-muted text-sm" style="padding:10px;">No levels yet.<br>Click + Add to create one.</p>` : ''}
+        ${subs.map(sub => `
+          <div class="cur-item ${CUR.subsectionId===sub.id?'cur-item-active':''}" onclick="curSelectSubsection(${sub.id},'${escHtml(sub.name)}')">
+            <div style="flex:1;">
+              <div style="font-weight:${CUR.subsectionId===sub.id?'600':'400'};font-size:13px;">${escHtml(sub.name)}</div>
+              <div style="font-size:11px;color:var(--text4);">${escHtml(sub.level)}</div>
+            </div>
+            <div class="cur-item-btns">
+              <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curEditSubsection(${sub.id},'${escHtml(sub.name)}','${escHtml(sub.level)}')" title="Edit">✏️</button>
+              <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curDeleteSubsection(${sub.id})" title="Delete">🗑️</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+window.curSelectSubsection = async (id, name) => {
+  CUR.subsectionId = id; CUR.lessonId = null; CUR.pageId = null;
+  const col3 = document.getElementById('cur-col-lessons');
+  col3.style.opacity = '1'; col3.style.pointerEvents = 'auto';
+  document.getElementById('cur-lesson-editor').innerHTML = '';
+  await curLoadLessons(id, name);
+};
+
+window.curAddSubsection = (sectionId) => modal('Add Level', `
+  <div class="form-row"><label class="label">Level name</label>
+    <input class="input" id="m-name" placeholder="e.g. Beginner, Upper Intermediate…"></div>
+  <div class="form-row"><label class="label">Level label</label>
+    <select class="select" id="m-level">
+      <option>Beginner</option><option>Elementary</option><option>Pre-Intermediate</option>
+      <option>Intermediate</option><option>Upper Intermediate</option><option>Advanced</option><option>Mixed</option>
+    </select>
+  </div>
+`, async (bd) => {
+  const name = bd.querySelector('#m-name').value.trim() || bd.querySelector('#m-level').value;
+  await POST('/api/subsections', { section_id: sectionId, name, level: bd.querySelector('#m-level').value });
+  toast('Level added', 'success');
+  await curLoadSubsections(sectionId, '');
+  document.querySelector(`[onclick="curSelectSection(${sectionId},'')"]`)?.click();
+  // Reload col 2 properly
+  const subs = await GET(`/api/sections/${sectionId}/subsections`);
+  const col = document.getElementById('cur-col-subsections');
+  col.querySelector('div[style*="padding:6px"]').innerHTML = subs.map(sub => `
+    <div class="cur-item ${CUR.subsectionId===sub.id?'cur-item-active':''}" onclick="curSelectSubsection(${sub.id},'${escHtml(sub.name)}')">
+      <div style="flex:1;"><div style="font-size:13px;">${escHtml(sub.name)}</div><div style="font-size:11px;color:var(--text4);">${escHtml(sub.level)}</div></div>
+      <div class="cur-item-btns">
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curEditSubsection(${sub.id},'${escHtml(sub.name)}','${escHtml(sub.level)}')" title="Edit">✏️</button>
+        <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curDeleteSubsection(${sub.id})" title="Delete">🗑️</button>
+      </div>
+    </div>`).join('');
+});
+
+window.curEditSubsection = (id, name, level) => modal('Edit Level', `
+  <div class="form-row"><label class="label">Name</label><input class="input" id="m-name" value="${escHtml(name)}"></div>
+  <div class="form-row"><label class="label">Level label</label>
+    <select class="select" id="m-level">
+      ${['Beginner','Elementary','Pre-Intermediate','Intermediate','Upper Intermediate','Advanced','Mixed'].map(l=>`<option ${l===level?'selected':''}>${l}</option>`).join('')}
+    </select>
+  </div>
+`, async (bd) => {
+  await PUT(`/api/subsections/${id}`, { name: bd.querySelector('#m-name').value.trim(), level: bd.querySelector('#m-level').value });
+  toast('Updated', 'success');
+  await curLoadSubsections(CUR.sectionId, '');
+});
+
+window.curDeleteSubsection = (id) => {
+  if (!confirm('Delete this level and all its lessons?')) return;
+  DEL(`/api/subsections/${id}`).then(async () => {
+    toast('Deleted', 'success');
+    if (CUR.subsectionId === id) { CUR.subsectionId = null; CUR.lessonId = null; }
+    await curLoadSubsections(CUR.sectionId, '');
+    document.getElementById('cur-col-lessons').innerHTML = '';
+    document.getElementById('cur-lesson-editor').innerHTML = '';
+  });
+};
+
+// ── Column 3: Lessons ─────────────────────
+async function curLoadLessons(subsectionId, levelName) {
+  const lessons = await GET(`/api/subsections/${subsectionId}/lessons`);
+  const col = document.getElementById('cur-col-lessons');
+  col.innerHTML = `
+    <div class="card" style="overflow:hidden;">
+      <div class="card-header" style="padding:12px 14px;">
+        <div class="card-title" style="font-size:13px;">📖 Lessons <span style="color:var(--accent);font-weight:400;font-size:11px;">${escHtml(levelName)}</span></div>
+        <button class="btn btn-primary btn-xs" onclick="curAddLesson(${subsectionId})">+ Add</button>
+      </div>
+      <div style="padding:6px;">
+        ${lessons.length === 0 ? `<p class="text-muted text-sm" style="padding:10px;">No lessons yet.<br>Click + Add to create one.</p>` : ''}
+        ${lessons.map(l => `
+          <div class="cur-item ${CUR.lessonId===l.id?'cur-item-active':''}" onclick="curSelectLesson(${l.id},'${escHtml(l.title)}')">
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:${CUR.lessonId===l.id?'600':'400'};">${escHtml(l.title)}</div>
+              ${l.description?`<div style="font-size:11px;color:var(--text4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${escHtml(l.description)}</div>`:''}
+            </div>
+            <div class="cur-item-btns">
+              <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curEditLesson(${l.id},'${escHtml(l.title)}','${escHtml(l.description||'')}')" title="Edit">✏️</button>
+              <button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();curDeleteLesson(${l.id})" title="Delete">🗑️</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+window.curSelectLesson = async (id, title) => {
+  CUR.lessonId = id;
+  // Highlight
+  document.querySelectorAll('#cur-col-lessons .cur-item').forEach(e => e.classList.remove('cur-item-active'));
+  event.currentTarget?.classList.add('cur-item-active');
+  await curLoadLessonEditor(id, title);
+};
+
+window.curAddLesson = (subsectionId) => modal('Add Lesson', `
+  <div class="form-row"><label class="label">Lesson title</label>
+    <input class="input" id="m-title" placeholder="e.g. Sports & Language, Business Emails…"></div>
+  <div class="form-row"><label class="label">Description <span class="text-muted">(optional)</span></label>
+    <textarea class="textarea" id="m-desc" rows="2" placeholder="Brief description shown to students"></textarea></div>
+`, async (bd) => {
+  const title = bd.querySelector('#m-title').value.trim();
+  if (!title) throw new Error('Title required');
+  await POST('/api/lessons', { subsection_id: subsectionId, title, description: bd.querySelector('#m-desc').value });
+  toast('Lesson added', 'success');
+  await curLoadLessons(subsectionId, '');
+});
+
+window.curEditLesson = (id, title, desc) => modal('Edit Lesson', `
+  <div class="form-row"><label class="label">Title</label><input class="input" id="m-title" value="${escHtml(title)}"></div>
+  <div class="form-row"><label class="label">Description</label><textarea class="textarea" id="m-desc" rows="2">${escHtml(desc)}</textarea></div>
+`, async (bd) => {
+  await PUT(`/api/lessons/${id}`, { title: bd.querySelector('#m-title').value.trim(), description: bd.querySelector('#m-desc').value });
+  toast('Updated', 'success');
+  await curLoadLessons(CUR.subsectionId, '');
+});
+
+window.curDeleteLesson = (id) => {
+  if (!confirm('Delete this lesson and all its pages and exercises?')) return;
+  DEL(`/api/lessons/${id}`).then(async () => {
+    toast('Deleted', 'success');
+    if (CUR.lessonId === id) { CUR.lessonId = null; document.getElementById('cur-lesson-editor').innerHTML = ''; }
+    await curLoadLessons(CUR.subsectionId, '');
+  });
+};
+
+// ── Lesson Editor (Pages + Exercises) ────
+async function curLoadLessonEditor(lessonId, title) {
+  const pages = await GET(`/api/lessons/${lessonId}/pages`);
+  const el = document.getElementById('cur-lesson-editor');
+  el.innerHTML = `
+    <div class="card" style="overflow:hidden;">
+      <div class="card-header">
+        <div class="card-title">📄 Pages — <span style="color:var(--accent);">${escHtml(title)}</span></div>
+        <button class="btn btn-primary btn-sm" onclick="curAddPage(${lessonId})">${icon('plus',13)} Add Page</button>
+      </div>
+      <div style="padding:14px;">
+        ${pages.length === 0 ? `<p class="text-muted text-sm">No pages yet. Click "Add Page" to start building this lesson.</p>` : ''}
+        <div style="display:flex;flex-direction:column;gap:10px;" id="cur-pages-list">
+          ${pages.map((p, i) => `
+            <div class="exercise-editor-item" id="cur-page-${p.id}">
+              <div class="exercise-editor-header">
+                <div class="flex items-center gap-2">
+                  <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">${i+1}</span>
+                  <span style="font-weight:600;">${escHtml(p.title)}</span>
+                </div>
+                <div class="flex gap-2">
+                  <button class="btn btn-primary btn-xs" onclick="curOpenExercises(${p.id},'${escHtml(p.title)}')">Edit Exercises</button>
+                  <button class="btn btn-ghost btn-xs" onclick="curEditPage(${p.id},'${escHtml(p.title)}',${lessonId},'${escHtml(title)}')" title="Rename">✏️</button>
+                  <button class="btn btn-ghost btn-xs" onclick="curDeletePage(${p.id},${lessonId},'${escHtml(title)}')" title="Delete">🗑️</button>
+                </div>
+              </div>
+              <div id="cur-exercises-${p.id}" style="display:none;padding:12px;border-top:1px solid var(--border);"></div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+window.curAddPage = (lessonId) => modal('Add Page', `
+  <div class="form-row"><label class="label">Page title</label>
+    <input class="input" id="m-title" placeholder="e.g. Warm Up, Listening, Grammar Practice…"></div>
+`, async (bd) => {
+  const title = bd.querySelector('#m-title').value.trim();
+  if (!title) throw new Error('Title required');
+  const pages = await GET(`/api/lessons/${lessonId}/pages`);
+  await POST('/api/lesson_pages', { lesson_id: lessonId, title, sort_order: pages.length });
+  toast('Page added', 'success');
+  await curLoadLessonEditor(lessonId, '');
+});
+
+window.curEditPage = (pageId, title, lessonId, lessonTitle) => modal('Rename Page', `
+  <div class="form-row"><label class="label">Page title</label><input class="input" id="m-title" value="${escHtml(title)}"></div>
+`, async (bd) => {
+  await PUT(`/api/lesson_pages/${pageId}`, { title: bd.querySelector('#m-title').value.trim() });
+  toast('Updated', 'success');
+  await curLoadLessonEditor(lessonId, lessonTitle);
+});
+
+window.curDeletePage = async (pageId, lessonId, lessonTitle) => {
+  if (!confirm('Delete this page and all its exercises?')) return;
+  await DEL(`/api/lesson_pages/${pageId}`);
+  toast('Page deleted', 'success');
+  await curLoadLessonEditor(lessonId, lessonTitle);
+};
+
+window.curOpenExercises = async (pageId, pageTitle) => {
+  const panel = document.getElementById(`cur-exercises-${pageId}`);
+  if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  CUR.pageId = pageId;
+  await curRenderExercises(pageId);
+};
+
+async function curRenderExercises(pageId) {
+  const panel = document.getElementById(`cur-exercises-${pageId}`);
+  const exercises = await GET(`/api/pages/${pageId}/exercises`);
+  const typeLabels = {
+    text:'📝 Text', teacher_note:'👁 Teacher Note', audio:'🎧 Audio',
+    dropdown:'📋 Dropdown', fill_blank_type:'✍️ Fill Blank (type)',
+    fill_blank_hint:'💡 Fill Blank (hint)', image_match:'🖼️ Image Match',
+    matching:'🔗 Matching', multiple_choice:'☑️ Multiple Choice'
+  };
+  panel.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+      ${exercises.length === 0 ? `<p class="text-muted text-sm">No exercises yet.</p>` : ''}
+      ${exercises.map((ex,i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-radius:var(--r);border:1px solid var(--border);">
+          <span style="font-size:12px;color:var(--text4);min-width:18px;">${i+1}.</span>
+          <span style="flex:1;font-size:13px;">${typeLabels[ex.type]||ex.type}</span>
+          <button class="btn btn-ghost btn-xs" onclick="editExercise(${ex.id},${pageId})">✏️ Edit</button>
+          <button class="btn btn-ghost btn-xs" onclick="curDeleteExercise(${ex.id},${pageId})">🗑️</button>
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-green btn-sm" onclick="addExercise(${pageId})">${icon('plus',13)} Add Exercise</button>`;
+}
+
+window.curDeleteExercise = async (exId, pageId) => {
+  if (!confirm('Delete this exercise?')) return;
+  await DEL(`/api/exercises/${exId}`);
+  toast('Deleted', 'success');
+  await curRenderExercises(pageId);
+};
+
+// Override loadExerciseEditor used by addExercise/editExercise to refresh cur panel
+const _origLoadExerciseEditor = window.loadExerciseEditor;
+window.loadExerciseEditor = async (pageId, inline) => {
+  if (CUR.pageId === pageId) { await curRenderExercises(pageId); return; }
+  if (_origLoadExerciseEditor) _origLoadExerciseEditor(pageId, inline);
+};
 
 async function loadCurriculumTree() {
   const sections = await GET('/api/sections');
