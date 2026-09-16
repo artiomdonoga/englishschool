@@ -728,11 +728,12 @@ window.curDeleteExercise = async (exId, pageId) => {
   await curRenderExercises(pageId);
 };
 
-// Override loadExerciseEditor used by addExercise/editExercise to refresh cur panel
-const _origLoadExerciseEditor = window.loadExerciseEditor;
+// Make addExercise/editExercise refresh the new cur panel after saving
 window.loadExerciseEditor = async (pageId, inline) => {
-  if (CUR.pageId === pageId) { await curRenderExercises(pageId); return; }
-  if (_origLoadExerciseEditor) _origLoadExerciseEditor(pageId, inline);
+  const panel = document.getElementById(`cur-exercises-${pageId}`);
+  if (panel) {
+    await curRenderExercises(pageId);
+  }
 };
 
 async function loadCurriculumTree() {
@@ -950,7 +951,11 @@ function openExerciseDataEditor(pageId, exId, type, data) {
       await POST('/api/exercises', { page_id: pageId, type, data: newData, sort_order: exs.length });
     }
     toast('Exercise saved', 'success');
-    await loadExerciseEditor(pageId, true);
+    // Refresh whichever panel is active
+    const curPanel = document.getElementById(`cur-exercises-${pageId}`);
+    if (curPanel) {
+      await curRenderExercises(pageId);
+    }
   }, 'Save Exercise');
 }
 
