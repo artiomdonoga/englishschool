@@ -15,10 +15,12 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 // Force HTTPS in production (Railway sets X-Forwarded-Proto)
 app.use((req, res, next) => {
-  if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production') {
     if (req.headers['x-forwarded-proto'] === 'http') {
       return res.redirect(301, 'https://' + req.headers.host + req.url);
     }
+    // Tell browsers to always use HTTPS for this domain for 1 year
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
   next();
 });
